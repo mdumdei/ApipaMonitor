@@ -1,0 +1,65 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<asmv1:assembly xsi:schemaLocation="urn:schemas-microsoft-com:asm.v1 assembly.adaptive.xsd" manifestVersion="1.0" xmlns:asmv1="urn:schemas-microsoft-com:asm.v1" xmlns="urn:schemas-microsoft-com:asm.v2" xmlns:asmv2="urn:schemas-microsoft-com:asm.v2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:co.v1="urn:schemas-microsoft-com:clickonce.v1" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3" xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" xmlns:co.v2="urn:schemas-microsoft-com:clickonce.v2">
+  <asmv1:assemblyIdentity name="APIPA Monitor.exe" version="2.0.1.0" publicKeyToken="86d7e4fa63054dac" language="neutral" processorArchitecture="msil" type="win32" />
+  <application />
+  <entryPoint>
+    <assemblyIdentity name="APIPA Monitor" version="1.1.0.0" language="neutral" processorArchitecture="msil" />
+    <commandLine file="APIPA Monitor.exe" parameters="" />
+  </entryPoint>
+  <trustInfo>
+    <security>
+      <applicationRequestMinimum>
+        <PermissionSet Unrestricted="true" ID="Custom" SameSite="site" />
+        <defaultAssemblyRequest permissionSetReference="Custom" />
+      </applicationRequestMinimum>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <!--
+          UAC Manifest Options
+          If you want to change the Windows User Account Control level replace the 
+          requestedExecutionLevel node with one of the following.
+
+        <requestedExecutionLevel  level="asInvoker" uiAccess="false" />
+        <requestedExecutionLevel  level="requireAdministrator" uiAccess="false" />
+        <requestedExecutionLevel  level="highestAvailable" uiAccess="false" />
+
+         If you want to utilize File and Registry Virtualization for backward 
+         compatibility then delete the requestedExecutionLevel node.
+    -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <dependency>
+    <dependentOS>
+      <osVersionInfo>
+        <os majorVersion="5" minorVersion="1" buildNumber="2600" servicePackMajor="0" />
+      </osVersionInfo>
+    </dependentOS>
+  </dependency>
+  <dependency>
+    <dependentAssembly dependencyType="preRequisite" allowDelayedBinding="true">
+      <assemblyIdentity name="Microsoft.Windows.CommonLanguageRuntime" version="4.0.30319.0" />
+    </dependentAssembly>
+  </dependency>
+  <dependency>
+    <dependentAssembly dependencyType="install" allowDelayedBinding="true" codebase="APIPA Monitor.exe" size="11752">
+      <assemblyIdentity name="APIPA Monitor" version="1.1.0.0" language="neutral" processorArchitecture="msil" />
+      <hash>
+        <dsig:Transforms>
+          <dsig:Transform Algorithm="urn:schemas-microsoft-com:HashTransforms.Identity" />
+        </dsig:Transforms>
+        <dsig:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha256" />
+        <dsig:DigestValue>B31pN9ajnplvdov7LpK/ZSykzCHiy7s+r6l+Oxi5ceo=</dsig:DigestValue>
+      </hash>
+    </dependentAssembly>
+  </dependency>
+  <file name="APIPA Monitor.exe.config" size="189">
+    <hash>
+      <dsig:Transforms>
+        <dsig:Transform Algorithm="urn:schemas-microsoft-com:HashTransforms.Identity" />
+      </dsig:Transforms>
+      <dsig:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha256" />
+      <dsig:DigestValue>6N7MliNbVJSIAIPrecIshMbZ7zEoKLr5SQvud4LDUOw=</dsig:DigestValue>
+    </hash>
+  </file>
+<publisherIdentity name="CN=BULLDOG\michael.dumdei" issuerKeyHash="e0a17231c6d36a9ba6de4307df8b5597af5833e7" /><Signature Id="StrongNameSignature" xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#" /><SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha256" /><Reference URI=""><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature" /><Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#" /></Transforms><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha256" /><DigestValue>nyDVUsJTBfs2bSjiv6Nlv2684f5z0CLci/IdI5K/Ouk=</DigestValue></Reference></SignedInfo><SignatureValue>KXGbgs5S+7bXlOQWFIT4cWuX7xbxsBQqHpD9x+WT2vksmpHtke5rzvLEew3i4jIaC3i/X43+gDfv1l6PkTdFPqmlAGfcr0RFQjtLffniXJO5aF0XixFEMrLbQ0dt8188bZol50iHMU0s2mpVsnl5ZBsOYvyeM+FGaYFENiM3STw=</SignatureValue><KeyInfo Id="StrongNameKeyInfo"><KeyValue><RSAKeyValue><Modulus>wQJlBvMR8qRNTBYxvV69fjCbV8wZomQGUWXuS7jOa/Jc1B6ETDnELq01AJEBFvi+IiTe9PDfBNje8iQgm1WECeA63yj/ZHHBYHhQhrVuovbrj9ARcIQlnFTbf7TSM9IRgWuF1qkDlyYgS4X9jFS/Is2I5G7JXVkM6G2RnpOWV7k=</Modulus><Exponent>AQAB</Exponent></RSAKeyValue></KeyValue><msrel:RelData xmlns:msrel="http://schemas.microsoft.com/windows/rel/2005/reldata"><r:license xmlns:r="urn:mpeg:mpeg21:2003:01-REL-R-NS" xmlns:as="http://schemas.microsoft.com/windows/pki/2005/Authenticode"><r:grant><as:ManifestInformation Hash="e93abf92231df28bdc22d073fee1bc6ebf65a3bfe2286d36fb0553c252d5209f" Description="" Url=""><as:assemblyIdentity name="APIPA Monitor.exe" version="2.0.1.0" publicKeyToken="86d7e4fa63054dac" language="neutral" processorArchitecture="msil" type="win32" /></as:ManifestInformation><as:SignedBy /><as:AuthenticodePublisher><as:X509SubjectName>CN=BULLDOG\michael.dumdei</as:X509SubjectName></as:AuthenticodePublisher></r:grant><r:issuer><Signature Id="AuthenticodeSignature" xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#" /><SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha256" /><Reference URI=""><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature" /><Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#" /></Transforms><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha256" /><DigestValue>p8DuZN9iGnYxZbSWGf987SqhFER3IkjB/BMlJv6S6yA=</DigestValue></Reference></SignedInfo><SignatureValue>lOkVb2BeZ6cZQUT1UKPoDwjVtNq5rnOiHK92KfZ+tKOw2MJ1FiDGLdsN8Lr2iKeHtQMHNY2t797oXAZim611vooGt3zSp6VFalnF5fkH7xy5MPk/0O6cv0DoR1uAKlRGichKX10PtIR+g5DiRkF2HOqgCeNB+Pq62R7Ln84Qf3k=</SignatureValue><KeyInfo><KeyValue><RSAKeyValue><Modulus>wQJlBvMR8qRNTBYxvV69fjCbV8wZomQGUWXuS7jOa/Jc1B6ETDnELq01AJEBFvi+IiTe9PDfBNje8iQgm1WECeA63yj/ZHHBYHhQhrVuovbrj9ARcIQlnFTbf7TSM9IRgWuF1qkDlyYgS4X9jFS/Is2I5G7JXVkM6G2RnpOWV7k=</Modulus><Exponent>AQAB</Exponent></RSAKeyValue></KeyValue><X509Data><X509Certificate>MIIB8TCCAVqgAwIBAgIQZbiGfYqEzqhBIKtWbEkZsjANBgkqhkiG9w0BAQsFADA3MTUwMwYDVQQDHiwAQgBVAEwATABEAE8ARwBcAG0AaQBjAGgAYQBlAGwALgBkAHUAbQBkAGUAaTAeFw0xNzA3MDcxNTMzMzZaFw0xODA3MDcyMTMzMzZaMDcxNTAzBgNVBAMeLABCAFUATABMAEQATwBHAFwAbQBpAGMAaABhAGUAbAAuAGQAdQBtAGQAZQBpMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDBAmUG8xHypE1MFjG9Xr1+MJtXzBmiZAZRZe5LuM5r8lzUHoRMOcQurTUAkQEW+L4iJN708N8E2N7yJCCbVYQJ4DrfKP9kccFgeFCGtW6i9uuP0BFwhCWcVNt/tNIz0hGBa4XWqQOXJiBLhf2MVL8izYjkbsldWQzobZGek5ZXuQIDAQABMA0GCSqGSIb3DQEBCwUAA4GBADD2O17KKrJPY1HavVEhiykZoxy6D2BT/N5nwu0eTVZzCj5MuhkauTTJkRdX0IwBDAQKPBWo6F+u+B2eYAT3PrXatroKviVus34a0BjtjdCOoWut3t5xaldzrZBdfn336Pca0Ut+WNOjY4myBl12dnJdkqnoCdu3UwxMCSe8gXqo</X509Certificate></X509Data></KeyInfo></Signature></r:issuer></r:license></msrel:RelData></KeyInfo></Signature></asmv1:assembly>
