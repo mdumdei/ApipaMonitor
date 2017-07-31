@@ -1,8 +1,0 @@
-\\bulldog.net\internal\home\employees\oit\michael.dumdei\my documents\visual studio 2015\Projects\APIPA Monitor\bin\x64\Debug\APIPA Monitor.exe.config
-\\bulldog.net\internal\home\employees\oit\michael.dumdei\my documents\visual studio 2015\Projects\APIPA Monitor\bin\x64\Debug\APIPA Monitor.exe
-\\bulldog.net\internal\home\employees\oit\michael.dumdei\my documents\visual studio 2015\Projects\APIPA Monitor\bin\x64\Debug\APIPA Monitor.pdb
-\\bulldog.net\internal\home\employees\oit\michael.dumdei\my documents\visual studio 2015\Projects\APIPA Monitor\obj\x64\Debug\APIPA_Monitor.apipamon.resources
-\\bulldog.net\internal\home\employees\oit\michael.dumdei\my documents\visual studio 2015\Projects\APIPA Monitor\obj\x64\Debug\APIPA_Monitor.ProjectInstaller.resources
-\\bulldog.net\internal\home\employees\oit\michael.dumdei\my documents\visual studio 2015\Projects\APIPA Monitor\obj\x64\Debug\APIPA Monitor.csproj.GenerateResource.Cache
-\\bulldog.net\internal\home\employees\oit\michael.dumdei\my documents\visual studio 2015\Projects\APIPA Monitor\obj\x64\Debug\APIPA Monitor.exe
-\\bulldog.net\internal\home\employees\oit\michael.dumdei\my documents\visual studio 2015\Projects\APIPA Monitor\obj\x64\Debug\APIPA Monitor.pdb
