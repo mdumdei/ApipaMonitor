@@ -7,7 +7,7 @@
  *    vers 2.0 - Added code to verify interface comes back up
  *    vers 2.01 - Put a 2 second pause between ping try attempts 1 & 2 and 2 & 3
  *    
- *  Service to monitors network ports for APIPA address assignement or 3 consecutive failed 
+ *  Service to monitor network ports for APIPA address assignement or 3 consecutive failed 
  *  pings to the default gateway. Does a reset of the network interface if either occurs.
  */
 using System;
