@@ -1,11 +1,14 @@
 ﻿/*
  *  APIPAMON - Michael Dumdei 
  *   Update versioning in project properties, OnStart event, and ping buffer when changed
- *    vers 1.0 - Initial code 
- *    vers 1.1 - Added ping the default gateway testing
- *    vers 1.2 - Added fix for Microsoft Failover cluster adapters that have APIPA addresses
- *    vers 2.0 - Added code to verify interface comes back up
+ *    vers 1.00 - Initial code 
+ *    vers 1.10 - Added ping the default gateway testing
+ *    vers 1.20 - Added fix for Microsoft Failover cluster adapters that have APIPA addresses
+ *    vers 2.00 - Added code to verify interface comes back up
  *    vers 2.01 - Put a 2 second pause between ping try attempts 1 & 2 and 2 & 3
+ *    vers 2.10 - Added optional command line integer argument to control resets based on 
+ *               ping failures. Set to number of times 3-ping test has to fail before 
+ *               resetting adapter. Defaults to 1 (first failure).
  *    
  *  Service to monitor network ports for APIPA address assignement or 3 consecutive failed 
  *  pings to the default gateway. Does a reset of the network interface if either occurs.
@@ -26,17 +29,30 @@ namespace APIPA_Monitor
         private System.Timers.Timer pollTimer;
         private int counter = 0;
         private int resetWait = 0;
+        private int pingFailCounter = 0;
+        private int max3PingTestFails = 1;
         static private int pingSecsCounter = (30 / 10) - 1;
         static NetworkInterface downInterface = null;
-        public apipamon()
+        public apipamon(string[] args)
         {
             InitializeComponent();
             SysUtils.EventLogSource = "apipamon";
+            string arg = "1";
+            if (args.Length > 0)    // command line args from HKLM\SYSTEM\CurrentControlSet\Services\ApipaMon
+                arg = args[0];      //  ex: sc config ApipaMon binPath= "c:\bin\APIPA Monitor.exe 5"
+            if (int.TryParse(arg, out max3PingTestFails) == false)
+                max3PingTestFails = 1;
         }
 
         protected override void OnStart(string[] args)
         {
-            SysUtils.WriteAppEventLog("APIPA monitoring service started - Version 2.01", eventCode: 1011);
+            if (args.Length > 0)    // command line args from Service properties
+            {
+                if (int.TryParse(args[0], out max3PingTestFails) == false)
+                    max3PingTestFails = 1;
+            }
+            SysUtils.WriteAppEventLog("APIPA monitoring service started - Version 2.10, 3-ping fail count = " 
+                + max3PingTestFails.ToString(), eventCode: 1011);
             pollTimer = new System.Timers.Timer(10000);  // poll every 10 seconds
             pollTimer.Elapsed += new System.Timers.ElapsedEventHandler(this.pollTimer_Elapsed);
             pollTimer.Start();
@@ -70,7 +86,7 @@ namespace APIPA_Monitor
                     PingOptions pngOpt = new PingOptions();
                     pngOpt.DontFragment = true;
                     bool isGood = false;
-                    byte[] buf = Encoding.ASCII.GetBytes("APIPA Monitor ver 2.01 6/22/2017");
+                    byte[] buf = Encoding.ASCII.GetBytes("APIPA Monitor ver 2.10 8/1/2017");
                     foreach (GatewayIPAddressInformation g in p.GatewayAddresses)
                     {
                         // try 3 times to get a ping response (50ms response time), all good if one works
@@ -92,9 +108,15 @@ namespace APIPA_Monitor
                                     Thread.Sleep(2000);
                             }
                         }
-                        if (isGood == false)
+                        if (isGood == true)
+                            pingFailCounter = 0;
+                        else
                         {
-                            ResetAdapter(a, "Pings failing", 9998);  // reset adapter if not pinging
+                            if (++pingFailCounter >= max3PingTestFails)
+                            {
+                                ResetAdapter(a, "Pings failing", 9998);  // reset adapter if not pinging
+                                pingFailCounter = 0;
+                            }
                             continue;
                         }
                     }
