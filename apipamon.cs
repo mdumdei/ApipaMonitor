@@ -1,100 +1,200 @@
 ﻿/*
- *  APIPAMON - Michael Dumdei 
+ *  APIPAMON - Michael Dumdei, Texarkana College
  *   Update versioning in project properties, OnStart event, and ping buffer when changed
  *    vers 1.00 - Initial code 
  *    vers 1.10 - Added ping the default gateway testing
  *    vers 1.20 - Added fix for Microsoft Failover cluster adapters that have APIPA addresses
  *    vers 2.00 - Added code to verify interface comes back up
  *    vers 2.01 - Put a 2 second pause between ping try attempts 1 & 2 and 2 & 3
- *    vers 2.10 - Added optional command line integer argument to control resets based on 
- *               ping failures. Set to number of times 3-ping test has to fail before 
- *               resetting adapter. Defaults to 1 (first failure).
+ *    vers 2.10 - Added optional command line integer argument to control resets.
+ *    vers 3.00 - Complete rewrite.
  *    
  *  Service to monitor network ports for APIPA address assignement or 3 consecutive failed 
  *  pings to the default gateway. Does a reset of the network interface if either occurs.
+ *  
+ *  Args: -i nnn  Poll interval (secs) - how often the service activates. Tests for APIPA on every 
+ *                 activation and resets adapter if APIPA address is active. Optional gateway 
+ *                 ping test at specified intervals. Default 10 secs.
+ *        -g nnn  Gateway test interval (secs) - how often to run ping tests against the default 
+ *                 gateway. Test is a series of 3 pings at 2 sec intervals. If all fail, the test 
+ *                 fails. Default every 30 secs.
+ *        -f nnn  Number of gateway ping tests that are allowed to fail before the adapter is
+ *                 reset due no response from gateway. Default is 1, reset on 1st failure.
+ *        -h nnn  Number of seconds to hold-off between adapter resets. This is to prevent
+ *                 back to back resets. Default is 25 secs.
+ *                 
+ *  sc config binpath= "c:\bin\apipamon.exe -i 10 -g 30 -f 1 -h 25"                
+ *                 
  */
 using System;
+using System.Text;
 using System.Diagnostics;
-using System.ServiceProcess;
 using System.Timers;
 using System.Threading;
 using System.Net.NetworkInformation;
-using System.Text;
+using System.Net;
+using System.Collections.Generic;
+using System.Net.Sockets;
+using System.ServiceProcess;
 
 namespace APIPA_Monitor
 {
+    class NIC
+    {
+        public string name { get; set; }
+        public OperationalStatus stat { get; set; }
+        public List<IPAddress> gwAddrs { get; set; }
+        public IPv4InterfaceProperties prop { get; set; }
+
+        public NIC(NetworkInterface a)
+        {
+            name = a.Name.ToUpper();
+            stat = a.OperationalStatus;
+            prop = a.GetIPProperties().GetIPv4Properties();
+            GatewayIPAddressInformationCollection gws = a.GetIPProperties().GatewayAddresses;
+            gwAddrs = new List<IPAddress>();
+            foreach (GatewayIPAddressInformation g in gws)
+            {
+                if (g.Address.AddressFamily == AddressFamily.InterNetwork)
+                    gwAddrs.Add(g.Address);
+            }
+        }
+    }
 
     public partial class apipamon : ServiceBase
     {
         private System.Timers.Timer pollTimer;
-        private int counter = 0;
-        private int resetWait = 0;
-        private int pingFailCounter = 0;
-        private int max3PingTestFails = 1;
-        static private int pingSecsCounter = (30 / 10) - 1;
-        static NetworkInterface downInterface = null;
+        private int pollInterval = 10 * 1000;                   // 10 secs as msec
+        private long gwTestInterval = 30L * 10000000L;          // 30 secs as ticks (100ns per tick)
+        private int maxGwFails = 1;                             // max gw fails before reset, always resets on APIPA
+        private long resetHoldoffInterval = 25L * 10000000L;    // 25 secs as ticks 
+        private int gwFailsCounter = 0;
+        private long lastReset, lastPingTest;
+
+        private NIC[] nicList;
+        private int nNICS = 0;
+
         public apipamon(string[] args)
         {
             InitializeComponent();
             SysUtils.EventLogSource = "apipamon";
-            string arg = "1";
-            if (args.Length > 0)    // command line args from HKLM\SYSTEM\CurrentControlSet\Services\ApipaMon
-                arg = args[0];      //  ex: sc config ApipaMon binPath= "c:\bin\APIPA Monitor.exe 5"
-            if (int.TryParse(arg, out max3PingTestFails) == false)
-                max3PingTestFails = 1;
+            processArgs(args);		// command line args from registry
         }
 
         protected override void OnStart(string[] args)
         {
-            if (args.Length > 0)    // command line args from Service properties
+            SysUtils.WriteAppEventLog("APIPA monitoring service starting - Version 3.00", eventCode: 1011);
+            processArgs(args);		// command line args from Service properties (one time)
+            SysUtils.WriteAppEventLog(string.Format(
+                "pollInterval={0}, gwTestInterval={1}, maxgwFails={2}, resetHoldOffInterval={3}",
+                 pollInterval, gwTestInterval, maxGwFails, resetHoldoffInterval), eventCode: 1012);
+            lastReset = lastPingTest = DateTime.Now.Ticks;
+            NetworkInterface[] adapters = NetworkInterface.GetAllNetworkInterfaces();
+            foreach (NetworkInterface a in adapters)
             {
-                if (int.TryParse(args[0], out max3PingTestFails) == false)
-                    max3PingTestFails = 1;
+                string nicName = a.Name.ToUpper();
+                try
+                {
+                    if (nicName.Contains("APIPA") == false && nicName.Contains("LOOPBACK") == false
+                      && a.Description.ToUpper().Contains("MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER") == false
+                      && a.GetIPProperties().GetIPv4Properties() != null)
+                        ++nNICS;
+                }
+                catch { }
             }
-            SysUtils.WriteAppEventLog("APIPA monitoring service started - Version 2.10, 3-ping fail count = " 
-                + max3PingTestFails.ToString(), eventCode: 1011);
-            pollTimer = new System.Timers.Timer(10000);  // poll every 10 seconds
+            nicList = new NIC[nNICS];
+            int i = 0;
+            foreach (NetworkInterface a in adapters)
+            {
+                string nicName = a.Name.ToUpper();
+                try
+                {
+                    if (nicName.Contains("APIPA") == false && nicName.Contains("LOOPBACK") == false
+                      && a.Description.ToUpper().Contains("MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER") == false
+                      && a.GetIPProperties().GetIPv4Properties() != null)
+                    {
+                        nicList[i] = new NIC(a);
+                        ++i;
+                    }
+                }
+                catch { }
+            }
+            pollTimer = new System.Timers.Timer(pollInterval);  // default every 10 seconds
             pollTimer.Elapsed += new System.Timers.ElapsedEventHandler(this.pollTimer_Elapsed);
             pollTimer.Start();
         }
 
+        void processArgs(string[] args)
+        {
+            bool status = true;
+            for (int i = 0; i < args.Length && status; i += 2)
+            {
+                int argval;
+                if ((args[i][0] != '-' && args[i][0] != '/') || (i + 1) >= args.Length || int.TryParse(args[i + 1], out argval) == false)
+                    status = false;
+                else
+                {
+                    string cmd = args[i].Substring(1).ToLower();
+                    if (cmd == "pollinterval" || cmd == "poll" || cmd == "i")
+                        pollInterval = argval * 1000;       // timer based - msec
+                    else if (cmd == "gwtestinterval" || cmd == "gwtest" || cmd == "g" || cmd == "t")
+                        gwTestInterval = argval * 10000000L;  // ticks based - 100ns per tick
+                    else if (cmd == "maxgwfails" || cmd == "gwfails" || cmd == "fails" || cmd == "f")
+                        maxGwFails = argval;
+                    else if (cmd == "resetholdoffinterval" ||  cmd == "resetinterval" || cmd == "h" || cmd == "r")
+                        resetHoldoffInterval = argval * 10000000L; // ticks based - 100ns per tick
+                    else
+                        status = false;
+                }
+            }
+            if (status == false)
+            {
+                SysUtils.WriteAppEventLog("Invalid arguments passed to service", EventLogEntryType.Error, 99);
+                throw new Exception("Invalid arguments");
+            }
+        }
+
         private void pollTimer_Elapsed(object sender, ElapsedEventArgs e)
         {
-            if (resetWait > 0)
+            bool doGatewayPingTest = false;
+
+            if (lastReset + resetHoldoffInterval > e.SignalTime.Ticks)
+                return;         // prevent back to back resets
+            if (gwTestInterval > 0 && lastPingTest + gwTestInterval < e.SignalTime.Ticks)
             {
-                --resetWait;        // prevent back to back resets
-                return;
+                doGatewayPingTest = true;
+                lastPingTest = e.SignalTime.Ticks;
             }
-            ++counter;
-            if (downInterface != null)
-                ResetAdapter(downInterface, "Stuck down", 10002);
-            NetworkInterface[] adapters = NetworkInterface.GetAllNetworkInterfaces();
-            foreach (NetworkInterface a in adapters)
+            UpdateNicStatus();
+            foreach (NIC n in nicList)
             {
-                if (a.OperationalStatus != OperationalStatus.Up)
+                if (n.stat != OperationalStatus.Up)
+                    ResetAdapter(n, "Stuck down", 10002);
+            }
+            foreach (NIC n in nicList)
+            {
+                if (n.stat != OperationalStatus.Up)
                     continue;
-                IPInterfaceProperties p = a.GetIPProperties();
-                if (p.GetIPv4Properties().IsAutomaticPrivateAddressingActive == true && a.Name.ToUpper().Contains("APIPA") == false
-                 && a.Description.ToUpper().Contains("MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER") == false)
+                if (n.prop.IsAutomaticPrivateAddressingActive == true)
                 {
-                    ResetAdapter(a, "APIPA address", 9999);
+                    ResetAdapter(n, "APIPA address", 9999);
                     continue;
                 }
-                if (counter > pingSecsCounter)    // every 30 sec ping the default gateway
+                if (doGatewayPingTest == true)
                 {
                     Ping png = new Ping();
                     PingOptions pngOpt = new PingOptions();
                     pngOpt.DontFragment = true;
                     bool isGood = false;
-                    byte[] buf = Encoding.ASCII.GetBytes("APIPA Monitor ver 2.10 8/1/2017");
-                    foreach (GatewayIPAddressInformation g in p.GatewayAddresses)
+                    byte[] buf = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.00 8/3/2017 - Gateway Test");
+                    foreach (IPAddress gwAddress in n.gwAddrs)
                     {
                         // try 3 times to get a ping response (50ms response time), all good if one works
                         for (int i = 1; i < 4 && isGood == false; ++i)
                         {
                             try
                             {
-                                isGood = png.Send(g.Address, 50, buf, pngOpt).Status == IPStatus.Success;
+                                isGood = png.Send(gwAddress, 50, buf, pngOpt).Status == IPStatus.Success;
                             }
                             catch (Exception ex)
                             {
@@ -109,74 +209,87 @@ namespace APIPA_Monitor
                             }
                         }
                         if (isGood == true)
-                            pingFailCounter = 0;
+                            gwFailsCounter = 0;
                         else
                         {
-                            if (++pingFailCounter >= max3PingTestFails)
+                            if (++gwFailsCounter >= maxGwFails)
                             {
-                                ResetAdapter(a, "Pings failing", 9998);  // reset adapter if not pinging
-                                pingFailCounter = 0;
+                                ResetAdapter(n, "Pings failing", 9998);  // reset adapter if not pinging
+                                gwFailsCounter = 0;
                             }
                             continue;
                         }
                     }
                 }
             }
-            if (counter > pingSecsCounter)
-                counter = 0;
         }
 
-        private void ResetAdapter(NetworkInterface a, string reason, int eventCode)
+        private void ResetAdapter(NIC a, string reason, int eventCode)
         {
-            SysUtils.WriteAppEventLog(reason + " on interface: " + a.Name + ", resetting", EventLogEntryType.Error, eventCode);
-            Disable(a);
+            SysUtils.WriteAppEventLog(reason + " on interface: " + a.name + ", resetting", EventLogEntryType.Error, eventCode);
+
+            SetNIC(a, enabling:false);
             Thread.Sleep(1000);
-            Enable(a);
-            resetWait = 3;
-            counter = 0;
+            SetNIC(a, enabling:true);
         }
 
-        private void Enable(NetworkInterface a)
+        void UpdateNicStatus()
         {
-            for (int i = 0; i < 5; ++i)
+            NetworkInterface[] adapters = NetworkInterface.GetAllNetworkInterfaces();
+            foreach (NIC n in nicList)
             {
-                ProcessStartInfo psi = new ProcessStartInfo("netsh", "interface set interface \"" + a.Name + "\" enable");
-                Process p = new Process();
-                p.StartInfo = psi;
-                p.Start();
-                Thread.Sleep(500);
-                for (int j = 0; j < 10; ++j)
+                bool found = false;
+                foreach (NetworkInterface a in adapters)
                 {
-                    if (a.OperationalStatus == OperationalStatus.Up)
+                    if (a.Name.ToUpper() == n.name)
                     {
-                        downInterface = null;
-                        return;
+                        found = true;
+                        n.prop = a.GetIPProperties().GetIPv4Properties();
+                        n.stat = a.OperationalStatus;
+                        break;
                     }
-                    Thread.Sleep(250);
                 }
+                if (found == false)
+                    n.stat = OperationalStatus.NotPresent;
             }
-            SysUtils.WriteAppEventLog("Failed to re-enable interface \"" + a.Name + "\"", EventLogEntryType.Error, 10001);
-            downInterface = a;
         }
 
-        void Disable(NetworkInterface a)
+        private void SetNIC(NIC a, bool enabling)
         {
-            for (int i = 0; i < 5; ++i)
-            { 
-                ProcessStartInfo psi =
-                    new ProcessStartInfo("netsh", "interface set interface \"" + a.Name + "\" disable");
-                Process p = new Process();
-                p.StartInfo = psi;
-                p.Start();
-                Thread.Sleep(500);
-                for (int j = 0; j < 10; ++j)
+            Process p = new Process();
+            bool success = false;
+            try
+            {
+                for (int i = 0; i < 5 && success == false; ++i)
                 {
-                    if (a.OperationalStatus != OperationalStatus.Up)
-                        return;
-                    Thread.Sleep(250);
+                    string cmd, args;
+                    cmd = Environment.SystemDirectory + "\\netsh.exe";
+                    args = "interface set interface \"" + a.name + "\" " + ((enabling) ? "enable" : "disable");
+                    p.StartInfo = new ProcessStartInfo(cmd, args);
+                    p.StartInfo.UseShellExecute = false;
+                    p.Start();
+                    Thread.Sleep(500);
+                    for (int j = 0; j < 10 && success == false; ++j)
+                    {
+                        UpdateNicStatus();
+                        if ((enabling ^ (a.stat == OperationalStatus.Up)) == false)
+                            success = true;
+                        Thread.Sleep(250);
+                    }
                 }
             }
-            SysUtils.WriteAppEventLog("Failed to disable interface \"" + a.Name + "\"", EventLogEntryType.Error, 10000);
+            catch { }
+            finally
+            {
+                p.Close();
+                if (success == false)
+                {
+                    if (enabling)
+                        SysUtils.WriteAppEventLog("Failed to re-enable interface \"" + a.name + "\"", EventLogEntryType.Error, 10001);
+                    else
+                        SysUtils.WriteAppEventLog("Failed to disable interface \"" + a.name + "\"", EventLogEntryType.Error, 10000);
+                }
+            }
         }
 
         protected override void OnStop()

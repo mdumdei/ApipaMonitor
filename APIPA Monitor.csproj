@@ -78,7 +78,8 @@
     <SignManifests>true</SignManifests>
   </PropertyGroup>
   <PropertyGroup>
-    <AssemblyOriginatorKeyFile>TC Code Sign - MD.snk</AssemblyOriginatorKeyFile>
+    <AssemblyOriginatorKeyFile>
+    </AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <PropertyGroup>
     <ManifestCertificateThumbprint>E7E4E0A3CA7E5B0924DB2BB797E5888C382E7BD7</ManifestCertificateThumbprint>
@@ -104,9 +105,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="apipamon.cs">
-      <SubType>Component</SubType>
-    </Compile>
+    <Compile Include="apipamon.cs" />
     <Compile Include="apipamon.Designer.cs">
       <DependentUpon>apipamon.cs</DependentUpon>
     </Compile>
@@ -121,9 +120,7 @@
     <Compile Include="SysUtils.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="APIPA Monitor_TemporaryKey.pfx" />
     <None Include="App.config" />
-    <None Include="TC Code Sign - MD.snk" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="apipamon.resx">
