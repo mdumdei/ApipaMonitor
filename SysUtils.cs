@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Threading;
 
-
 namespace APIPA_Monitor
 {
     public class SysUtils

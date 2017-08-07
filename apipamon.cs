@@ -22,8 +22,14 @@
  *                 reset due no response from gateway. Default is 1, reset on 1st failure.
  *        -h nnn  Number of seconds to hold-off between adapter resets. This is to prevent
  *                 back to back resets. Default is 25 secs.
+ *
+ *  Install: Copy to the folder where you want the EXE to reside
+ *           Run: "APIPA Monitor.exe" -install ARGS  
+ *                 Where args is the list of settings you want - none if you like the defaults
  *                 
- *  sc config binpath= "c:\bin\apipamon.exe -i 10 -g 30 -f 1 -h 25"                
+ *  Uninstall: "APIPA Moniter.exe" -uninstall
+ *           
+ *  Reconfigure: sc config binpath= "c:\bin\apipamon.exe -i 10 -g 30 -f 1 -h 25"                
  *                 
  */
 using System;
@@ -67,7 +73,7 @@ namespace APIPA_Monitor
         private int pollInterval = 10 * 1000;                   // 10 secs as msec
         private long gwTestInterval = 30L * 10000000L;          // 30 secs as ticks (100ns per tick)
         private int maxGwFails = 1;                             // max gw fails before reset, always resets on APIPA
-        private long resetHoldoffInterval = 25L * 10000000L;    // 25 secs as ticks 
+        private long holdOffInterval = 25L * 10000000L;         // 25 secs as ticks 
         private int gwFailsCounter = 0;
         private long lastReset, lastPingTest;
 
@@ -86,8 +92,11 @@ namespace APIPA_Monitor
             SysUtils.WriteAppEventLog("APIPA monitoring service starting - Version 3.00", eventCode: 1011);
             processArgs(args);		// command line args from Service properties (one time)
             SysUtils.WriteAppEventLog(string.Format(
-                "pollInterval={0}, gwTestInterval={1}, maxgwFails={2}, resetHoldOffInterval={3}",
-                 pollInterval, gwTestInterval, maxGwFails, resetHoldoffInterval), eventCode: 1012);
+                "pollInterval={0}, gwTestInterval={1}, maxgwFails={2}, holdOffInterval={3}",
+                 pollInterval / 1000, 
+                 (gwTestInterval + 510000L) / 10000000L, 
+                 maxGwFails, 
+                 (holdOffInterval + 510000L) / 10000000L), eventCode: 1012);
             lastReset = lastPingTest = DateTime.Now.Ticks;
             NetworkInterface[] adapters = NetworkInterface.GetAllNetworkInterfaces();
             foreach (NetworkInterface a in adapters)
@@ -126,6 +135,8 @@ namespace APIPA_Monitor
 
         void processArgs(string[] args)
         {
+            long gwInterval = gwTestInterval / 10000000L, hoInterval = holdOffInterval / 10000000L;
+            int pInterval = pollInterval / 1000;
             bool status = true;
             for (int i = 0; i < args.Length && status; i += 2)
             {
@@ -135,14 +146,14 @@ namespace APIPA_Monitor
                 else
                 {
                     string cmd = args[i].Substring(1).ToLower();
-                    if (cmd == "pollinterval" || cmd == "poll" || cmd == "i")
-                        pollInterval = argval * 1000;       // timer based - msec
+                    if (cmd == "pollinterval" || cmd == "poll" || cmd == "p" || cmd == "i")
+                        pInterval = argval;
                     else if (cmd == "gwtestinterval" || cmd == "gwtest" || cmd == "g" || cmd == "t")
-                        gwTestInterval = argval * 10000000L;  // ticks based - 100ns per tick
+                        gwInterval = argval;
                     else if (cmd == "maxgwfails" || cmd == "gwfails" || cmd == "fails" || cmd == "f")
                         maxGwFails = argval;
-                    else if (cmd == "resetholdoffinterval" ||  cmd == "resetinterval" || cmd == "h" || cmd == "r")
-                        resetHoldoffInterval = argval * 10000000L; // ticks based - 100ns per tick
+                    else if (cmd == "holdoffinterval" || cmd == "resetinterval" || cmd == "h" || cmd == "r")
+                        hoInterval = argval;
                     else
                         status = false;
                 }
@@ -152,13 +163,22 @@ namespace APIPA_Monitor
                 SysUtils.WriteAppEventLog("Invalid arguments passed to service", EventLogEntryType.Error, 99);
                 throw new Exception("Invalid arguments");
             }
+             // Back off the tick-based counters by 50 msec if they are exact multiples of the
+             // polling interval, so they happen on the correct poll and not the one that follows.
+            pollInterval = pInterval * 1000;
+            gwTestInterval = gwInterval * 10000000;
+            if (gwInterval % pInterval == 0)
+                gwTestInterval -= 500000L;
+            holdOffInterval = hoInterval * 10000000;
+            if (hoInterval % pInterval == 0)
+                holdOffInterval -= 500000;
         }
 
         private void pollTimer_Elapsed(object sender, ElapsedEventArgs e)
         {
             bool doGatewayPingTest = false;
 
-            if (lastReset + resetHoldoffInterval > e.SignalTime.Ticks)
+            if (lastReset + holdOffInterval > e.SignalTime.Ticks)
                 return;         // prevent back to back resets
             if (gwTestInterval > 0 && lastPingTest + gwTestInterval < e.SignalTime.Ticks)
             {
@@ -169,7 +189,7 @@ namespace APIPA_Monitor
             foreach (NIC n in nicList)
             {
                 if (n.stat != OperationalStatus.Up)
-                    ResetAdapter(n, "Stuck down", 10002);
+                    ResetAdapter(n, "Stuck down", 10002, e.SignalTime.Ticks);
             }
             foreach (NIC n in nicList)
             {
@@ -177,7 +197,7 @@ namespace APIPA_Monitor
                     continue;
                 if (n.prop.IsAutomaticPrivateAddressingActive == true)
                 {
-                    ResetAdapter(n, "APIPA address", 9999);
+                    ResetAdapter(n, "APIPA address", 9999, e.SignalTime.Ticks);
                     continue;
                 }
                 if (doGatewayPingTest == true)
@@ -214,7 +234,7 @@ namespace APIPA_Monitor
                         {
                             if (++gwFailsCounter >= maxGwFails)
                             {
-                                ResetAdapter(n, "Pings failing", 9998);  // reset adapter if not pinging
+                                ResetAdapter(n, "Pings failing", 9998, e.SignalTime.Ticks);  // reset if not pinging
                                 gwFailsCounter = 0;
                             }
                             continue;
@@ -224,10 +244,10 @@ namespace APIPA_Monitor
             }
         }
 
-        private void ResetAdapter(NIC a, string reason, int eventCode)
+        private void ResetAdapter(NIC a, string reason, int eventCode, long currentTicks)
         {
             SysUtils.WriteAppEventLog(reason + " on interface: " + a.name + ", resetting", EventLogEntryType.Error, eventCode);
-
+            lastReset = currentTicks;
             SetNIC(a, enabling:false);
             Thread.Sleep(1000);
             SetNIC(a, enabling:true);
