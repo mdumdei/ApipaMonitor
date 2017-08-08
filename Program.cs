@@ -22,7 +22,6 @@ namespace APIPA_Monitor
         static void Main(string[] args)
         {
             string[] svcArgs = args;
-            var g = typeof(apipamon);
             if (args.Length > 0)
             {
                 foreach (string s in args)
