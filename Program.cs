@@ -1,4 +1,8 @@
-﻿using System;
+﻿/*
+ *  APIPAMON - Michael Dumdei, Texarkana College
+ *   Installer code: Me, Google denizens, et al
+*/
+using System;
 using System.ServiceProcess;
 using System.Collections;
 using System.Configuration.Install;
@@ -11,6 +15,10 @@ namespace APIPA_Monitor
         /// <summary>
         /// The main entry point for the application.
         /// </summary>
+        /// 
+        static string svcName = "apipamon";
+        static System.Reflection.Assembly svcType = typeof(apipamon).Assembly;
+
         static void Main(string[] args)
         {
             string[] svcArgs = args;
@@ -42,6 +50,11 @@ namespace APIPA_Monitor
             ServiceBase.Run(ServicesToRun);
         }
 
+
+        // Process command line args, stripping out -install or -uninstall switch so that
+        //  what is left are the args for the service itself. It then writes those args
+        //  to the HKLM/SYSTEM/CurrentControlSet/Services/apimon ImagePath entry and
+        //  returns the processed arg array.
         private static string[] ConfigureArgs(string[] args)
         {
             string svcArgs = string.Empty;
@@ -65,13 +78,16 @@ namespace APIPA_Monitor
             return (svcArgs == string.Empty) ? new string[0] : svcArgs.Split(new char[] { ' ' });
         }
 
+#region Googled Installer Code with some modifications to make it work and more generic
+         // Code to install and uninstall the service. For the most part, taken from code found
+         //  on the Internet (StackOverflow).
         private static bool IsInstalled()
         {
-            using (ServiceController controller = new ServiceController("apipamon"))
+            using (ServiceController controller = new ServiceController(svcName))
             {
                 try
                 {
-                    string name = controller.ServiceName;
+                    string name = controller.ServiceName;  // mod from checking status
                 }
                 catch
                 {
@@ -83,7 +99,7 @@ namespace APIPA_Monitor
 
         private static bool IsRunning()
         {
-            using (ServiceController controller = new ServiceController("apipamon"))
+            using (ServiceController controller = new ServiceController(svcName))
             {
                 if (!IsInstalled())
                     return false;
@@ -93,7 +109,7 @@ namespace APIPA_Monitor
 
         private static AssemblyInstaller GetInstaller()
         {
-            AssemblyInstaller installer = new AssemblyInstaller(typeof(apipamon).Assembly, null);
+            AssemblyInstaller installer = new AssemblyInstaller(svcType, null);
             installer.UseNewContext = true;
             return installer;
         }
@@ -158,7 +174,7 @@ namespace APIPA_Monitor
         {
             if (!IsInstalled())
                 return;
-            using (ServiceController controller =  new ServiceController("apipamon"))
+            using (ServiceController controller =  new ServiceController(svcName))
             {
                 try
                 {
@@ -180,7 +196,7 @@ namespace APIPA_Monitor
         {
             if (!IsInstalled())
                 return;
-            using (ServiceController controller = new ServiceController("apipamon"))
+            using (ServiceController controller = new ServiceController(svcName))
             {
                 try
                 {
@@ -197,6 +213,7 @@ namespace APIPA_Monitor
                 }
             }
         }
+#endregion
     }
 
 }

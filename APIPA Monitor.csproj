@@ -124,10 +124,6 @@
     <Compile Include="SysUtils.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="App.config" />
-    <None Include="Properties\app.manifest" />
-  </ItemGroup>
-  <ItemGroup>
     <EmbeddedResource Include="apipamon.resx">
       <DependentUpon>apipamon.cs</DependentUpon>
     </EmbeddedResource>

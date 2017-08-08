@@ -29,7 +29,7 @@
  *                 
  *  Uninstall: "APIPA Moniter.exe" -uninstall
  *           
- *  Reconfigure: sc config binpath= "c:\bin\apipamon.exe -i 10 -g 30 -f 1 -h 25"                
+ *  Reconfigure: sc config binpath= "\"c:\bin\apipamon.exe\" -i 10 -g 30 -f 1 -h 25"                
  *                 
  */
 using System;
@@ -45,6 +45,10 @@ using System.ServiceProcess;
 
 namespace APIPA_Monitor
 {
+
+    //
+    // Class to track data of interest in IPV4 enabled NICS being monitored
+    //
     class NIC
     {
         public string name { get; set; }
@@ -67,43 +71,47 @@ namespace APIPA_Monitor
         }
     }
 
+    // APIPA Monitor main Service class
     public partial class apipamon : ServiceBase
     {
         private System.Timers.Timer pollTimer;
+        private int gwFailsCounter = 0;
+        private long lastReset, lastPingTest;
+        private NIC[] nicList;
+        private int nNICS = 0;
+
+        // Default values below are overriddent first by Service registry arguments if present
+        // and those by Service start args in the GUI if those are present
         private int pollInterval = 10 * 1000;                   // 10 secs as msec
         private long gwTestInterval = 30L * 10000000L;          // 30 secs as ticks (100ns per tick)
         private int maxGwFails = 1;                             // max gw fails before reset, always resets on APIPA
         private long holdOffInterval = 25L * 10000000L;         // 25 secs as ticks 
-        private int gwFailsCounter = 0;
-        private long lastReset, lastPingTest;
-
-        private NIC[] nicList;
-        private int nNICS = 0;
 
         public apipamon(string[] args)
         {
             InitializeComponent();
             SysUtils.EventLogSource = "apipamon";
-            processArgs(args);		// command line args from registry
+            processArgs(args);		// command line args from registry: CurrentControlSet, Services
         }
 
         protected override void OnStart(string[] args)
         {
             SysUtils.WriteAppEventLog("APIPA monitoring service starting - Version 3.00", eventCode: 1011);
-            processArgs(args);		// command line args from Service properties (one time)
+            processArgs(args);		// command line args from Service GUI properties (one time override)
             SysUtils.WriteAppEventLog(string.Format(
                 "pollInterval={0}, gwTestInterval={1}, maxgwFails={2}, holdOffInterval={3}",
                  pollInterval / 1000, 
-                 (gwTestInterval + 510000L) / 10000000L, 
+                 Math.Round((double)gwTestInterval / 10000000.0), 
                  maxGwFails, 
-                 (holdOffInterval + 510000L) / 10000000L), eventCode: 1012);
+                 Math.Round((double)holdOffInterval / 10000000.0)), eventCode: 1012);
             lastReset = lastPingTest = DateTime.Now.Ticks;
             NetworkInterface[] adapters = NetworkInterface.GetAllNetworkInterfaces();
+             // First foreach loop counts up how many NICS the service will monitor
             foreach (NetworkInterface a in adapters)
             {
                 string nicName = a.Name.ToUpper();
                 try
-                {
+                {    // skip loopback, NICS with "APIPA" in the name, MS cluster NIC, and non-IPV4 enabled NICS
                     if (nicName.Contains("APIPA") == false && nicName.Contains("LOOPBACK") == false
                       && a.Description.ToUpper().Contains("MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER") == false
                       && a.GetIPProperties().GetIPv4Properties() != null)
@@ -111,8 +119,9 @@ namespace APIPA_Monitor
                 }
                 catch { }
             }
-            nicList = new NIC[nNICS];
+            nicList = new NIC[nNICS];               // allocate NICS array
             int i = 0;
+             // Second foreach loop initializes NIC objects in NICS array
             foreach (NetworkInterface a in adapters)
             {
                 string nicName = a.Name.ToUpper();
@@ -122,17 +131,21 @@ namespace APIPA_Monitor
                       && a.Description.ToUpper().Contains("MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER") == false
                       && a.GetIPProperties().GetIPv4Properties() != null)
                     {
-                        nicList[i] = new NIC(a);
+                        nicList[i] = new NIC(a);    // initialize NIC holding data
                         ++i;
                     }
                 }
                 catch { }
             }
+             // Start the Service activation timer
             pollTimer = new System.Timers.Timer(pollInterval);  // default every 10 seconds
             pollTimer.Elapsed += new System.Timers.ElapsedEventHandler(this.pollTimer_Elapsed);
             pollTimer.Start();
         }
 
+        // 
+        // Process arguments - called for both Registry based args and then  Service GUI args in that order,
+        //  so Service GUI args (if present) override any in the registry
         void processArgs(string[] args)
         {
             long gwInterval = gwTestInterval / 10000000L, hoInterval = holdOffInterval / 10000000L;
@@ -174,38 +187,42 @@ namespace APIPA_Monitor
                 holdOffInterval -= 500000;
         }
 
+
+        // Service activated process
         private void pollTimer_Elapsed(object sender, ElapsedEventArgs e)
         {
             bool doGatewayPingTest = false;
 
             if (lastReset + holdOffInterval > e.SignalTime.Ticks)
-                return;         // prevent back to back resets
+                return;         // exit if a reset was performed within the holdoff period 
             if (gwTestInterval > 0 && lastPingTest + gwTestInterval < e.SignalTime.Ticks)
-            {
+            {                   // set flag if time to do a gateway test & update "last ran"
                 doGatewayPingTest = true;
                 lastPingTest = e.SignalTime.Ticks;
             }
-            UpdateNicStatus();
+            UpdateNicStatus();  // get current state of NICS
             foreach (NIC n in nicList)
-            {
+            {                   // they should all be up - if not, try and bring it up
                 if (n.stat != OperationalStatus.Up)
                     ResetAdapter(n, "Stuck down", 10002, e.SignalTime.Ticks);
             }
             foreach (NIC n in nicList)
             {
                 if (n.stat != OperationalStatus.Up)
-                    continue;
+                    continue;   // no need to check APIPA or gateway if NIC is down
                 if (n.prop.IsAutomaticPrivateAddressingActive == true)
-                {
+                {               // test for 169.254 address & reset if the NIC has one for an IP
                     ResetAdapter(n, "APIPA address", 9999, e.SignalTime.Ticks);
                     continue;
                 }
+                 // Do the 3-ping gateway test if enabled and time to do so
                 if (doGatewayPingTest == true)
                 {
                     Ping png = new Ping();
                     PingOptions pngOpt = new PingOptions();
                     pngOpt.DontFragment = true;
                     bool isGood = false;
+                     // load buffer with identifying information for anyone sniffing traffic
                     byte[] buf = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.00 8/3/2017 - Gateway Test");
                     foreach (IPAddress gwAddress in n.gwAddrs)
                     {
@@ -228,13 +245,13 @@ namespace APIPA_Monitor
                                     Thread.Sleep(2000);
                             }
                         }
-                        if (isGood == true)
+                        if (isGood == true)         // if ping succeeded, reset number of gateway test fails counter
                             gwFailsCounter = 0;
                         else
-                        {
-                            if (++gwFailsCounter >= maxGwFails)
+                        {                           // if all 3 failed, update gw failed counter & reset NIC
+                            if (++gwFailsCounter >= maxGwFails) //                          if limit reached
                             {
-                                ResetAdapter(n, "Pings failing", 9998, e.SignalTime.Ticks);  // reset if not pinging
+                                ResetAdapter(n, "Pings failing", 9998, e.SignalTime.Ticks);
                                 gwFailsCounter = 0;
                             }
                             continue;
@@ -244,15 +261,17 @@ namespace APIPA_Monitor
             }
         }
 
+        // Bounce the NIC
         private void ResetAdapter(NIC a, string reason, int eventCode, long currentTicks)
         {
             SysUtils.WriteAppEventLog(reason + " on interface: " + a.name + ", resetting", EventLogEntryType.Error, eventCode);
-            lastReset = currentTicks;
-            SetNIC(a, enabling:false);
-            Thread.Sleep(1000);
-            SetNIC(a, enabling:true);
+            lastReset = currentTicks;       // update timer value for when the NIC was last reset - used for holdoff
+            SetNIC(a, enabling:false);      // disable the NIC
+            Thread.Sleep(1000);             // wait one second
+            SetNIC(a, enabling:true);       // enable the NIC - this normally clears the APIPA condition
         }
 
+        // Get current state of NICS being monitored
         void UpdateNicStatus()
         {
             NetworkInterface[] adapters = NetworkInterface.GetAllNetworkInterfaces();
@@ -261,19 +280,20 @@ namespace APIPA_Monitor
                 bool found = false;
                 foreach (NetworkInterface a in adapters)
                 {
-                    if (a.Name.ToUpper() == n.name)
+                    if (a.Name.ToUpper() == n.name)  // found a NIC being monitored
                     {
                         found = true;
-                        n.prop = a.GetIPProperties().GetIPv4Properties();
-                        n.stat = a.OperationalStatus;
+                        n.prop = a.GetIPProperties().GetIPv4Properties(); // holds APIPA state
+                        n.stat = a.OperationalStatus;                     // determines if online
                         break;
                     }
                 }
-                if (found == false)
+                if (found == false)                                       // hits this if NIC disabled
                     n.stat = OperationalStatus.NotPresent;
             }
         }
 
+        // Enables / disables NICs based on 'enabling' = true or false. Invokes "netsh.exe" to do the work.
         private void SetNIC(NIC a, bool enabling)
         {
             Process p = new Process();
@@ -328,6 +348,7 @@ namespace APIPA_Monitor
         protected override void OnContinue()
         {
             base.OnContinue();
+            lastPingTest = lastReset = DateTime.Now.Ticks;  // reset "last ticks" if restarting after a pause
             pollTimer.Start();
         }
     }
