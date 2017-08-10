@@ -8,6 +8,7 @@
  *    vers 2.01 - Put a 2 second pause between ping try attempts 1 & 2 and 2 & 3
  *    vers 2.10 - Added optional command line integer argument to control resets.
  *    vers 3.00 - Complete rewrite.
+ *    vers 3.01 - Added ping test timeout as an optional parameter.
  *    
  *  Service to monitor network ports for APIPA address assignement or 3 consecutive failed 
  *  pings to the default gateway. Does a reset of the network interface if either occurs.
@@ -18,18 +19,20 @@
  *        -g nnn  Gateway test interval (secs) - how often to run ping tests against the default 
  *                 gateway. Test is a series of 3 pings at 2 sec intervals. If all fail, the test 
  *                 fails. Default every 30 secs.
+ *        -t nnn  Ping timeout (msec) - number of milliseconds to wait for ping response when
+ *                 performing default gateway tests. Default is 50 msec.
  *        -f nnn  Number of gateway ping tests that are allowed to fail before the adapter is
  *                 reset due no response from gateway. Default is 1, reset on 1st failure.
  *        -h nnn  Number of seconds to hold-off between adapter resets. This is to prevent
  *                 back to back resets. Default is 25 secs.
- *
+ *                 
  *  Install: Copy to the folder where you want the EXE to reside
  *           Run: "APIPA Monitor.exe" -install ARGS  
  *                 Where args is the list of settings you want - none if you like the defaults
  *                 
  *  Uninstall: "APIPA Moniter.exe" -uninstall
  *           
- *  Reconfigure: sc config binpath= "\"c:\bin\apipamon.exe\" -i 10 -g 30 -f 1 -h 25"                
+ *  Reconfigure: sc config binpath= "\"c:\bin\apipamon.exe\" -i 10 -g 30 -t 100 -f 1 -h 25"                
  *                 
  */
 using System;
@@ -74,34 +77,41 @@ namespace APIPA_Monitor
     // APIPA Monitor main Service class
     public partial class apipamon : ServiceBase
     {
+        // Event log information
+        private static string eventSource = "apipamon";
+        private static string startingMsg = "APIPA monitoring service starting - Version 3.01";
+        // Load ping buffer with identifying information for anyone sniffing traffic
+        private static byte[] pingData = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.01 8/9/2017 - Gateway Test");
+        // Globals
         private System.Timers.Timer pollTimer;
         private int gwFailsCounter = 0;
         private long lastReset, lastPingTest;
         private NIC[] nicList;
         private int nNICS = 0;
-
-        // Default values below are overriddent first by Service registry arguments if present
+        // Default values below are overridden first by Service registry arguments if present
         // and those by Service start args in the GUI if those are present
         private int pollInterval = 10 * 1000;                   // 10 secs as msec
         private long gwTestInterval = 30L * 10000000L;          // 30 secs as ticks (100ns per tick)
+        private int pingTimeout = 50;                           // 50 msecs allowed for ping response
         private int maxGwFails = 1;                             // max gw fails before reset, always resets on APIPA
         private long holdOffInterval = 25L * 10000000L;         // 25 secs as ticks 
 
         public apipamon(string[] args)
         {
             InitializeComponent();
-            SysUtils.EventLogSource = "apipamon";
+            SysUtils.EventLogSource = eventSource;
             processArgs(args);		// command line args from registry: CurrentControlSet, Services
         }
 
         protected override void OnStart(string[] args)
         {
-            SysUtils.WriteAppEventLog("APIPA monitoring service starting - Version 3.00", eventCode: 1011);
+            SysUtils.WriteAppEventLog(startingMsg, eventCode: 1011);
             processArgs(args);		// command line args from Service GUI properties (one time override)
             SysUtils.WriteAppEventLog(string.Format(
-                "pollInterval={0}, gwTestInterval={1}, maxgwFails={2}, holdOffInterval={3}",
+                "pollInterval={0}, gwTestInterval={1}, pingTimeout={2}, maxgwFails={3}, holdOffInterval={4}",
                  pollInterval / 1000, 
                  Math.Round((double)gwTestInterval / 10000000.0), 
+                 pingTimeout,
                  maxGwFails, 
                  Math.Round((double)holdOffInterval / 10000000.0)), eventCode: 1012);
             lastReset = lastPingTest = DateTime.Now.Ticks;
@@ -159,13 +169,15 @@ namespace APIPA_Monitor
                 else
                 {
                     string cmd = args[i].Substring(1).ToLower();
-                    if (cmd == "pollinterval" || cmd == "poll" || cmd == "p" || cmd == "i")
+                    if (cmd == "pollinterval" || cmd == "i")
                         pInterval = argval;
-                    else if (cmd == "gwtestinterval" || cmd == "gwtest" || cmd == "g" || cmd == "t")
+                    else if (cmd == "gwtestinterval" ||  cmd == "g")
                         gwInterval = argval;
-                    else if (cmd == "maxgwfails" || cmd == "gwfails" || cmd == "fails" || cmd == "f")
+                    else if (cmd == "pingtimeout" || cmd == "t")
+                        pingTimeout = argval;
+                    else if (cmd == "maxgwfails" || cmd == "f")
                         maxGwFails = argval;
-                    else if (cmd == "holdoffinterval" || cmd == "resetinterval" || cmd == "h" || cmd == "r")
+                    else if (cmd == "holdoffinterval" || cmd == "h")
                         hoInterval = argval;
                     else
                         status = false;
@@ -222,16 +234,14 @@ namespace APIPA_Monitor
                     PingOptions pngOpt = new PingOptions();
                     pngOpt.DontFragment = true;
                     bool isGood = false;
-                     // load buffer with identifying information for anyone sniffing traffic
-                    byte[] buf = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.00 8/3/2017 - Gateway Test");
                     foreach (IPAddress gwAddress in n.gwAddrs)
                     {
-                        // try 3 times to get a ping response (50ms response time), all good if one works
+                        // try 3 times to get a ping response (default 50ms response time), all good if one works
                         for (int i = 1; i < 4 && isGood == false; ++i)
                         {
                             try
                             {
-                                isGood = png.Send(gwAddress, 50, buf, pngOpt).Status == IPStatus.Success;
+                                isGood = png.Send(gwAddress, pingTimeout, pingData, pngOpt).Status == IPStatus.Success;
                             }
                             catch (Exception ex)
                             {

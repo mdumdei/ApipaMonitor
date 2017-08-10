@@ -21,6 +21,7 @@ namespace APIPA_Monitor
 
         static void Main(string[] args)
         {
+            SysUtils.EventLogSource = svcName;
             string[] svcArgs = args;
             if (args.Length > 0)
             {
@@ -34,8 +35,8 @@ namespace APIPA_Monitor
                     }
                     if (s.ToLower() == "-install")
                     {
-                        InstallService();
                         svcArgs = ConfigureArgs(args);
+                        InstallService();
                         StartService();
                         return;
                     }
@@ -58,21 +59,45 @@ namespace APIPA_Monitor
         {
             string svcArgs = string.Empty;
             bool first = true;
+            SysUtils.WriteAppEventLog(args[0]);
             if (args.Length > 1)
             {
-                string path = System.Reflection.Assembly.GetEntryAssembly().Location;
-                foreach (string s in args)
+                try
                 {
-                    if (s.ToLower() != "-install" && s.ToLower() != "-uninstall")
+                    string path = System.Reflection.Assembly.GetEntryAssembly().Location;
+                    int val;
+                    for (int i = 0; i < args.Length; ++i)
                     {
-                        svcArgs += ((first) ? string.Empty : " ") + s;
-                        first = false;
+                        string sw = args[i].ToLower().Replace('/', '-');
+                        if (sw.Length == 1)
+                            sw = "-" + sw;      // help out if they forgot the dash
+                        if (sw != "-install" && sw != "-uninstall")
+                        {
+                            ++i;
+                            SysUtils.WriteAppEventLog(string.Format("sw:[{0}], val:[{1}]", 
+                              sw, (i < args.Length ? args[i] : "missing")), eventCode: 41);
+                            if ("-i-g-t-f-h".Contains(sw) == false || i >= args.Length || int.TryParse(args[i], out val) == false)
+                                throw new Exception("Invalid argument");
+                            svcArgs += ((first) ? string.Empty : " ") + sw;
+                            svcArgs += (" " + val.ToString());
+                            first = false;
+                        }
+                    }
+                    try
+                    {
+                        RegistryKey key = Registry.LocalMachine.OpenSubKey("SYSTEM", true);
+                        key = key.OpenSubKey("CurrentControlSet", true).OpenSubKey("Services", true);
+                        key = key.CreateSubKey("apipamon");
+                        key.SetValue("ImagePath", string.Format("\"{0}\" {1}", path, svcArgs));
+                    }
+                    catch {
+                            throw new Exception("Error updating registry - are you running as admin?");
                     }
                 }
-                RegistryKey key = Registry.LocalMachine.OpenSubKey("SYSTEM", true);
-                key = key.OpenSubKey("CurrentControlSet", true).OpenSubKey("Services", true);
-                key = key.CreateSubKey("apipamon");
-                key.SetValue("ImagePath", string.Format("\"{0}\" {1}", path, svcArgs));
+                catch (Exception ex) {
+                    SysUtils.WriteAppEventLog("Error processing arguments: " + ex.Message, eventCode: 49);
+                    throw ex;
+                }
             }
             return (svcArgs == string.Empty) ? new string[0] : svcArgs.Split(new char[] { ' ' });
         }
