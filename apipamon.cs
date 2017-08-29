@@ -79,9 +79,9 @@ namespace APIPA_Monitor
     {
         // Event log information
         private static string eventSource = "apipamon";
-        private static string startingMsg = "APIPA monitoring service starting - Version 3.01";
+        private static string startingMsg = "APIPA monitoring service starting - Version 3.02";
         // Load ping buffer with identifying information for anyone sniffing traffic
-        private static byte[] pingData = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.01 8/9/2017 - Gateway Test");
+        private static byte[] pingData = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.02 8/29/2017 - Gateway Test");
         // Globals
         private System.Timers.Timer pollTimer;
         private int gwFailsCounter = 0;
@@ -92,7 +92,7 @@ namespace APIPA_Monitor
         // and those by Service start args in the GUI if those are present
         private int pollInterval = 10 * 1000;                   // 10 secs as msec
         private long gwTestInterval = 30L * 10000000L;          // 30 secs as ticks (100ns per tick)
-        private int pingTimeout = 50;                           // 50 msecs allowed for ping response
+        private int pingTimeout = 500;                          // 500 msecs allowed for ping response
         private int maxGwFails = 1;                             // max gw fails before reset, always resets on APIPA
         private long holdOffInterval = 25L * 10000000L;         // 25 secs as ticks 
 

@@ -35,8 +35,9 @@ namespace APIPA_Monitor
                     }
                     if (s.ToLower() == "-install")
                     {
-                        svcArgs = ConfigureArgs(args);
+                        svcArgs = ConfigureArgs(args);  // first is to abort install if bad args
                         InstallService();
+                        svcArgs = ConfigureArgs(args);  // Reset registry ImagePath if InstallService breaks it
                         StartService();
                         return;
                     }
@@ -59,7 +60,6 @@ namespace APIPA_Monitor
         {
             string svcArgs = string.Empty;
             bool first = true;
-            SysUtils.WriteAppEventLog(args[0]);
             if (args.Length > 1)
             {
                 try
@@ -89,6 +89,7 @@ namespace APIPA_Monitor
                         key = key.OpenSubKey("CurrentControlSet", true).OpenSubKey("Services", true);
                         key = key.CreateSubKey("apipamon");
                         key.SetValue("ImagePath", string.Format("\"{0}\" {1}", path, svcArgs));
+                        SysUtils.WriteAppEventLog(string.Format("Reg:[{0}][{1}]", path, svcArgs), eventCode: 42);
                     }
                     catch {
                             throw new Exception("Error updating registry - are you running as admin?");
