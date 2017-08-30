@@ -9,6 +9,7 @@
  *    vers 2.10 - Added optional command line integer argument to control resets.
  *    vers 3.00 - Complete rewrite.
  *    vers 3.01 - Added ping test timeout as an optional parameter.
+ *    vers 3.03 - Added control to limit writes to EventLog on failed gateway ping
  *    
  *  Service to monitor network ports for APIPA address assignement or 3 consecutive failed 
  *  pings to the default gateway. Does a reset of the network interface if either occurs.
@@ -20,7 +21,10 @@
  *                 gateway. Test is a series of 3 pings at 2 sec intervals. If all fail, the test 
  *                 fails. Default every 30 secs.
  *        -t nnn  Ping timeout (msec) - number of milliseconds to wait for ping response when
- *                 performing default gateway tests. Default is 50 msec.
+ *                 performing default gateway tests. Default is 800 msec (some switches have very
+ *                 low priority on response to gateway pings).
+ *        -l n    Sets the number of failed pings that may occur before recording in the
+ *                 EventLog. Default is 1.
  *        -f nnn  Number of gateway ping tests that are allowed to fail before the adapter is
  *                 reset due no response from gateway. Default is 1, reset on 1st failure.
  *        -h nnn  Number of seconds to hold-off between adapter resets. This is to prevent
@@ -79,9 +83,9 @@ namespace APIPA_Monitor
     {
         // Event log information
         private static string eventSource = "apipamon";
-        private static string startingMsg = "APIPA monitoring service starting - Version 3.02";
+        private static string startingMsg = "APIPA monitoring service starting - Version 3.03";
         // Load ping buffer with identifying information for anyone sniffing traffic
-        private static byte[] pingData = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.02 8/29/2017 - Gateway Test");
+        private static byte[] pingData = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.03 8/30/2017 - Gateway Test");
         // Globals
         private System.Timers.Timer pollTimer;
         private int gwFailsCounter = 0;
@@ -90,11 +94,13 @@ namespace APIPA_Monitor
         private int nNICS = 0;
         // Default values below are overridden first by Service registry arguments if present
         // and those by Service start args in the GUI if those are present
-        private int pollInterval = 10 * 1000;                   // 10 secs as msec
-        private long gwTestInterval = 30L * 10000000L;          // 30 secs as ticks (100ns per tick)
-        private int pingTimeout = 500;                          // 500 msecs allowed for ping response
-        private int maxGwFails = 1;                             // max gw fails before reset, always resets on APIPA
-        private long holdOffInterval = 25L * 10000000L;         // 25 secs as ticks 
+        private int pollInterval = 10 * 1000;                   // -i 10 secs as msec
+        private long gwTestInterval = 30L * 10000000L;          // -g 30 secs as ticks (100ns per tick)
+        private int pingTimeout = 500;                          // -t 500 msecs allowed for ping response
+        private int maxPingFailsBeforeLogging = 1;              // -l default is don't log first failed ping
+        private int maxGwFails = 1;                             // -f max gw fails before reset, always resets on APIPA
+        private long holdOffInterval = 25L * 10000000L;         // -h 25 secs as ticks 
+       
 
         public apipamon(string[] args)
         {
@@ -171,10 +177,12 @@ namespace APIPA_Monitor
                     string cmd = args[i].Substring(1).ToLower();
                     if (cmd == "pollinterval" || cmd == "i")
                         pInterval = argval;
-                    else if (cmd == "gwtestinterval" ||  cmd == "g")
+                    else if (cmd == "gwtestinterval" || cmd == "g")
                         gwInterval = argval;
                     else if (cmd == "pingtimeout" || cmd == "t")
                         pingTimeout = argval;
+                    else if (cmd == "allowedpingfails" || cmd == "l")
+                        maxPingFailsBeforeLogging = argval;
                     else if (cmd == "maxgwfails" || cmd == "f")
                         maxGwFails = argval;
                     else if (cmd == "holdoffinterval" || cmd == "h")
@@ -250,7 +258,8 @@ namespace APIPA_Monitor
                             }
                             if (isGood == false)
                             {
-                                SysUtils.WriteAppEventLog($"Ping {i} failed", EventLogEntryType.Warning, i);
+                                if (i > maxPingFailsBeforeLogging)
+                                    SysUtils.WriteAppEventLog($"Ping {i} failed", EventLogEntryType.Warning, i);
                                 if (i < 3)
                                     Thread.Sleep(2000);
                             }
