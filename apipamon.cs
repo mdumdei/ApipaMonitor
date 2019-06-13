@@ -10,6 +10,7 @@
  *    vers 3.00 - Complete rewrite.
  *    vers 3.01 - Added ping test timeout as an optional parameter.
  *    vers 3.03 - Added control to limit writes to EventLog on failed gateway ping
+ *    vers 3.04 - Changed default gw fails default from 1 to 2 and ping timeout to 500 msec
  *    
  *  Service to monitor network ports for APIPA address assignement or 3 consecutive failed 
  *  pings to the default gateway. Does a reset of the network interface if either occurs.
@@ -26,9 +27,12 @@
  *        -l n    Sets the number of failed pings that may occur before recording in the
  *                 EventLog. Default is 1.
  *        -f nnn  Number of gateway ping tests that are allowed to fail before the adapter is
- *                 reset due no response from gateway. Default is 1, reset on 1st failure.
+ *                 reset due no response from gateway. Default is 2, reset on 2nd failure.
  *        -h nnn  Number of seconds to hold-off between adapter resets. This is to prevent
  *                 back to back resets. Default is 25 secs.
+ *        -m SMTPserver Name or IP of SMTP server for APIPA Monitor notices. Leave blank for
+ *                 no notices.
+ *        -d      Debug mode - more entries to Event Log.
  *                 
  *  Install: Copy to the folder where you want the EXE to reside
  *           Run: "APIPA Monitor.exe" -install ARGS  
@@ -36,7 +40,7 @@
  *                 
  *  Uninstall: "APIPA Moniter.exe" -uninstall
  *           
- *  Reconfigure: sc config binpath= "\"c:\bin\apipamon.exe\" -i 10 -g 30 -t 100 -f 1 -h 25"                
+ *  Reconfigure: sc config binpath= "\"c:\bin\apipamon.exe\" -i 10 -g 30 -t 100 -f 1 -h 25 -m txk-mb-01"                
  *                 
  */
 using System;
@@ -61,9 +65,10 @@ namespace APIPA_Monitor
         public string name { get; set; }
         public OperationalStatus stat { get; set; }
         public List<IPAddress> gwAddrs { get; set; }
+        public List<IPAddress> dnsAddrs { get; set; }
         public IPv4InterfaceProperties prop { get; set; }
 
-        public NIC(NetworkInterface a)
+        public NIC(NetworkInterface a, List<IPAddress> myIPs)
         {
             name = a.Name.ToUpper();
             stat = a.OperationalStatus;
@@ -75,6 +80,12 @@ namespace APIPA_Monitor
                 if (g.Address.AddressFamily == AddressFamily.InterNetwork)
                     gwAddrs.Add(g.Address);
             }
+            dnsAddrs = new List<IPAddress>();
+            foreach  (IPAddress adr in a.GetIPProperties().DnsAddresses)
+            {
+                if (adr.AddressFamily == AddressFamily.InterNetwork && myIPs.Contains(adr) == false)
+                    dnsAddrs.Add(adr);
+            }
         }
     }
 
@@ -83,23 +94,30 @@ namespace APIPA_Monitor
     {
         // Event log information
         private static string eventSource = "apipamon";
-        private static string startingMsg = "APIPA monitoring service starting - Version 3.03";
+        private static string startingMsg = "APIPA monitoring service starting - Version 3.05";
         // Load ping buffer with identifying information for anyone sniffing traffic
-        private static byte[] pingData = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.03 8/30/2017 - Gateway Test");
+        private static byte[] pingData = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.05 8/31/2017 - Gateway Test");
         // Globals
         private System.Timers.Timer pollTimer;
         private int gwFailsCounter = 0;
         private long lastReset, lastPingTest;
         private NIC[] nicList;
         private int nNICS = 0;
+        private List<IPAddress> myIPs = new List<IPAddress>();
+        // Event code values - 9000 is added to failure events if using SMTP notifications
+        private int evtStarting = 1000, evtArgsList = 1001, evtTriggerSMTP = 1002;
+        private int evtArgError = 99, evtDebug = 25, evtPingException = 98;
+        private int evtGwFail = 996, evtMaxGwFail = 997, evtStuck = 998, evtAPIPA = 999;
         // Default values below are overridden first by Service registry arguments if present
         // and those by Service start args in the GUI if those are present
         private int pollInterval = 10 * 1000;                   // -i 10 secs as msec
         private long gwTestInterval = 30L * 10000000L;          // -g 30 secs as ticks (100ns per tick)
         private int pingTimeout = 500;                          // -t 500 msecs allowed for ping response
         private int maxPingFailsBeforeLogging = 1;              // -l default is don't log first failed ping
-        private int maxGwFails = 1;                             // -f max gw fails before reset, always resets on APIPA
-        private long holdOffInterval = 25L * 10000000L;         // -h 25 secs as ticks 
+        private int maxGwFails = 4;                             // -f max gw fails before reset, always resets on APIPA
+        private long holdOffInterval = 55L * 10000000L;         // -h 55 secs as ticks (1 minute)
+        private string SMTPserver = string.Empty;               // SMTP server for apipamon notices
+        private bool debug = false;                             // switch for extra debug info in EventLog
        
 
         public apipamon(string[] args)
@@ -111,15 +129,17 @@ namespace APIPA_Monitor
 
         protected override void OnStart(string[] args)
         {
-            SysUtils.WriteAppEventLog(startingMsg, eventCode: 1011);
+            SysUtils.WriteAppEventLog(startingMsg, eventCode: evtStarting);
             processArgs(args);		// command line args from Service GUI properties (one time override)
             SysUtils.WriteAppEventLog(string.Format(
-                "pollInterval={0}, gwTestInterval={1}, pingTimeout={2}, maxgwFails={3}, holdOffInterval={4}",
+                "pollInterval={0}, gwTestInterval={1}, pingTimeout={2}, pingFailsBeforeLogging={3}, maxgwFails={4}, holdOffInterval={5}, SMTP={6}",
                  pollInterval / 1000, 
                  Math.Round((double)gwTestInterval / 10000000.0), 
                  pingTimeout,
+                 maxPingFailsBeforeLogging,
                  maxGwFails, 
-                 Math.Round((double)holdOffInterval / 10000000.0)), eventCode: 1012);
+                 Math.Round((double)holdOffInterval / 10000000.0),
+                 SMTPserver), eventCode: evtArgsList);
             lastReset = lastPingTest = DateTime.Now.Ticks;
             NetworkInterface[] adapters = NetworkInterface.GetAllNetworkInterfaces();
              // First foreach loop counts up how many NICS the service will monitor
@@ -129,11 +149,26 @@ namespace APIPA_Monitor
                 try
                 {    // skip loopback, NICS with "APIPA" in the name, MS cluster NIC, and non-IPV4 enabled NICS
                     if (nicName.Contains("APIPA") == false && nicName.Contains("LOOPBACK") == false
+                      && nicName.Contains("BLUETOOTH") == false 
                       && a.Description.ToUpper().Contains("MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER") == false
                       && a.GetIPProperties().GetIPv4Properties() != null)
+                    {
                         ++nNICS;
+                        foreach (IPAddressInformation addr in a.GetIPProperties().UnicastAddresses)
+                        {
+                            if (addr.Address.AddressFamily == AddressFamily.InterNetwork && IPAddress.IsLoopback(addr.Address) == false)
+                                myIPs.Add(addr.Address);
+                        }
+                    }
                 }
                 catch { }
+            }
+            if (debug)
+            {
+                string s = "myIPs";
+                foreach (IPAddress addr in myIPs)
+                    s += ":" + addr.ToString();
+                SysUtils.WriteAppEventLog(s, eventCode: evtDebug);
             }
             nicList = new NIC[nNICS];               // allocate NICS array
             int i = 0;
@@ -144,10 +179,11 @@ namespace APIPA_Monitor
                 try
                 {
                     if (nicName.Contains("APIPA") == false && nicName.Contains("LOOPBACK") == false
+                      && nicName.Contains("BLUETOOTH") == false 
                       && a.Description.ToUpper().Contains("MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER") == false
                       && a.GetIPProperties().GetIPv4Properties() != null)
                     {
-                        nicList[i] = new NIC(a);    // initialize NIC holding data
+                        nicList[i] = new NIC(a, myIPs);    // initialize NIC holding data
                         ++i;
                     }
                 }
@@ -167,33 +203,50 @@ namespace APIPA_Monitor
             long gwInterval = gwTestInterval / 10000000L, hoInterval = holdOffInterval / 10000000L;
             int pInterval = pollInterval / 1000;
             bool status = true;
-            for (int i = 0; i < args.Length && status; i += 2)
+            for (int i = 0; i < args.Length && status; ++i)
             {
-                int argval;
-                if ((args[i][0] != '-' && args[i][0] != '/') || (i + 1) >= args.Length || int.TryParse(args[i + 1], out argval) == false)
+                int argval = 0;
+                if ((args[i][0] != '-' && args[i][0] != '/'))
                     status = false;
-                else
+                string cmd = args[i].Substring(1, 1).ToLower();
+                if (status == true && "igtlfh".Contains(cmd))
                 {
-                    string cmd = args[i].Substring(1).ToLower();
-                    if (cmd == "pollinterval" || cmd == "i")
+                    if (++i >= args.Length || (int.TryParse(args[i], out argval) == false))
+                        status = false;
+                }
+                if (status == true)
+                {
+                    if (cmd == "i")             // pollinterval
                         pInterval = argval;
-                    else if (cmd == "gwtestinterval" || cmd == "g")
+                    else if (cmd == "g")        // gwtestinterval
                         gwInterval = argval;
-                    else if (cmd == "pingtimeout" || cmd == "t")
+                    else if (cmd == "t")        // pingtimeout
                         pingTimeout = argval;
-                    else if (cmd == "allowedpingfails" || cmd == "l")
+                    else if (cmd == "allowedpingfails" || cmd == "l")   // allowedpingfails
                         maxPingFailsBeforeLogging = argval;
-                    else if (cmd == "maxgwfails" || cmd == "f")
+                    else if (cmd == "maxgwfails" || cmd == "f")         // maxgwfails
                         maxGwFails = argval;
-                    else if (cmd == "holdoffinterval" || cmd == "h")
+                    else if (cmd == "holdoffinterval" || cmd == "h")    // holdoffinterval
                         hoInterval = argval;
+                    else if (cmd == "m") {      // smtp
+                        if (++i >= args.Length)
+                            status = false;
+                        else
+                        {
+                            SMTPserver = args[i];
+                             // Add 9000 to trigger events in associated Task Scheduler jobs
+                            evtGwFail += 9000; evtMaxGwFail += 9000; evtStuck += 9000; evtAPIPA += 9000;
+                        }
+                    }
+                    else if (cmd == "d")        // debug
+                        debug = true;
                     else
                         status = false;
                 }
             }
             if (status == false)
             {
-                SysUtils.WriteAppEventLog("Invalid arguments passed to service", EventLogEntryType.Error, 99);
+                SysUtils.WriteAppEventLog("Invalid arguments passed to service", EventLogEntryType.Error, evtArgError);
                 throw new Exception("Invalid arguments");
             }
              // Back off the tick-based counters by 50 msec if they are exact multiples of the
@@ -211,20 +264,20 @@ namespace APIPA_Monitor
         // Service activated process
         private void pollTimer_Elapsed(object sender, ElapsedEventArgs e)
         {
-            bool doGatewayPingTest = false;
+            bool doConnectivityTest = false;
 
             if (lastReset + holdOffInterval > e.SignalTime.Ticks)
                 return;         // exit if a reset was performed within the holdoff period 
             if (gwTestInterval > 0 && lastPingTest + gwTestInterval < e.SignalTime.Ticks)
             {                   // set flag if time to do a gateway test & update "last ran"
-                doGatewayPingTest = true;
+                doConnectivityTest = true;
                 lastPingTest = e.SignalTime.Ticks;
             }
             UpdateNicStatus();  // get current state of NICS
             foreach (NIC n in nicList)
             {                   // they should all be up - if not, try and bring it up
                 if (n.stat != OperationalStatus.Up)
-                    ResetAdapter(n, "Stuck down", 10002, e.SignalTime.Ticks);
+                    ResetAdapter(n, "Stuck down", evtStuck, e.SignalTime.Ticks);
             }
             foreach (NIC n in nicList)
             {
@@ -232,52 +285,90 @@ namespace APIPA_Monitor
                     continue;   // no need to check APIPA or gateway if NIC is down
                 if (n.prop.IsAutomaticPrivateAddressingActive == true)
                 {               // test for 169.254 address & reset if the NIC has one for an IP
-                    ResetAdapter(n, "APIPA address", 9999, e.SignalTime.Ticks);
+                    ResetAdapter(n, "APIPA address", evtAPIPA, e.SignalTime.Ticks);
                     continue;
                 }
-                 // Do the 3-ping gateway test if enabled and time to do so
-                if (doGatewayPingTest == true)
+                // Do the 3-ping gateway test if enabled and time to do so
+                if (doConnectivityTest == true)
+                    TestConnectivity(e, n);
+            }
+        }
+
+        private void TestConnectivity(ElapsedEventArgs e, NIC n)
+        {
+            Ping png = new Ping();
+            PingOptions pngOpt = new PingOptions();
+            pngOpt.DontFragment = true;
+            int nDns = n.dnsAddrs.Count, nGws = n.gwAddrs.Count, j = -1;
+            bool isGood = (nDns == 0 && nGws == 0);   // no gateway & no DNS = no connectivity test - always "good"
+            while (isGood == false && (++j < nGws || j < nDns))
+            {
+                // try 3 times to get a ping response from either the gateway or registered DNS server, all good if one works
+                for (int i = 1; i < 4 && isGood == false; ++i)
                 {
-                    Ping png = new Ping();
-                    PingOptions pngOpt = new PingOptions();
-                    pngOpt.DontFragment = true;
-                    bool isGood = false;
-                    foreach (IPAddress gwAddress in n.gwAddrs)
+                    try
                     {
-                        // try 3 times to get a ping response (default 50ms response time), all good if one works
-                        for (int i = 1; i < 4 && isGood == false; ++i)
+                        if (j < nDns)
                         {
-                            try
-                            {
-                                isGood = png.Send(gwAddress, pingTimeout, pingData, pngOpt).Status == IPStatus.Success;
-                            }
-                            catch (Exception ex)
-                            {
-                                SysUtils.WriteAppEventLog(ex.Message, EventLogEntryType.Information, 10);
-                                isGood = false;
-                            }
-                            if (isGood == false)
-                            {
-                                if (i > maxPingFailsBeforeLogging)
-                                    SysUtils.WriteAppEventLog($"Ping {i} failed", EventLogEntryType.Warning, i);
-                                if (i < 3)
-                                    Thread.Sleep(2000);
-                            }
+                            isGood = png.Send(n.dnsAddrs[j], pingTimeout, pingData, pngOpt).Status == IPStatus.Success;
+                            if (debug)
+                                SysUtils.WriteAppEventLog($"Ping DNS {n.dnsAddrs[j].ToString()} {isGood.ToString()}", eventCode: evtDebug);
                         }
-                        if (isGood == true)         // if ping succeeded, reset number of gateway test fails counter
-                            gwFailsCounter = 0;
-                        else
-                        {                           // if all 3 failed, update gw failed counter & reset NIC
-                            if (++gwFailsCounter >= maxGwFails) //                          if limit reached
-                            {
-                                ResetAdapter(n, "Pings failing", 9998, e.SignalTime.Ticks);
-                                gwFailsCounter = 0;
-                            }
-                            continue;
+                        if (isGood == false && j < nGws)
+                        {
+                            isGood = png.Send(n.gwAddrs[j], pingTimeout, pingData, pngOpt).Status == IPStatus.Success;
+                            if (debug)
+                                SysUtils.WriteAppEventLog($"Ping GW {n.dnsAddrs[j].ToString()} {isGood.ToString()}", eventCode: evtDebug);
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        SysUtils.WriteAppEventLog(ex.Message, EventLogEntryType.Information, evtPingException);
+                        isGood = false;
+                    }
+                    if (isGood == false)
+                    {
+                        if (i > maxPingFailsBeforeLogging)
+                            SysUtils.WriteAppEventLog($"Ping {i} failed", EventLogEntryType.Warning, i);
+                        if (i < 3)
+                            Thread.Sleep(2000);
+                    }
+                }
+                if (isGood == true)         // if ping succeeded, reset number of gateway test fails counter
+                    gwFailsCounter = 0;
+                else
+                {    // if all 3 failed, update gw failed counter 
+                    ++gwFailsCounter;
+                    SysUtils.WriteAppEventLog($"{n.name}:connectivity test failed {gwFailsCounter} time(s)", eventCode: evtGwFail);
+                    if (gwFailsCounter >= maxGwFails) //                          if limit reached
+                    {
+                        ResetAdapter(n, "Connectivity test failure count exceeds limit", evtMaxGwFail, e.SignalTime.Ticks);
+                        gwFailsCounter = 0;
+                    }
+                    continue;
                 }
             }
+        }
+
+        private bool TestSMTPAvailable()
+        {
+            if (string.IsNullOrEmpty(SMTPserver))
+                return false;
+            Ping png = new Ping();
+            PingOptions pngOpt = new PingOptions();
+            pngOpt.DontFragment = true;
+            for (int i = 0; i < 3; ++i)
+            {
+                if (i > 0)
+                    Thread.Sleep(5000);
+                try
+                {
+                    if (png.Send(SMTPserver, pingTimeout, pingData, pngOpt).Status == IPStatus.Success)
+                        return true;
+                }
+                catch { }
+            }
+            return false;
         }
 
         // Bounce the NIC
@@ -288,6 +379,8 @@ namespace APIPA_Monitor
             SetNIC(a, enabling:false);      // disable the NIC
             Thread.Sleep(1000);             // wait one second
             SetNIC(a, enabling:true);       // enable the NIC - this normally clears the APIPA condition
+            if (TestSMTPAvailable() == true)
+                SysUtils.WriteAppEventLog("Triggered apipamon email notice", eventCode: evtTriggerSMTP);
         }
 
         // Get current state of NICS being monitored

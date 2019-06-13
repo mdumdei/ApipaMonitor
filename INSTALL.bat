@@ -1,0 +1,1 @@
+powershell.exe -ExecutionPolicy ByPass \\bulldog.net\internal\Utilities\APIPAMonitor\apipaInstall.ps1

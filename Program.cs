@@ -65,7 +65,7 @@ namespace APIPA_Monitor
                 try
                 {
                     string path = System.Reflection.Assembly.GetEntryAssembly().Location;
-                    int val;
+                    int val = 0;
                     for (int i = 0; i < args.Length; ++i)
                     {
                         string sw = args[i].ToLower().Replace('/', '-');
@@ -73,13 +73,21 @@ namespace APIPA_Monitor
                             sw = "-" + sw;      // help out if they forgot the dash
                         if (sw != "-install" && sw != "-uninstall")
                         {
-                            ++i;
                             SysUtils.WriteAppEventLog(string.Format("sw:[{0}], val:[{1}]", 
-                              sw, (i < args.Length ? args[i] : "missing")), eventCode: 41);
-                            if ("-i-g-t-f-h".Contains(sw) == false || i >= args.Length || int.TryParse(args[i], out val) == false)
+                              sw, ((i + 1) < args.Length ? args[i + 1] : "NoValue")), eventCode: 41);
+                            bool goodArgs = true;
+                            if ("-i-g-t-f-h-m".Contains(sw))
+                            {
+                                if (++i >= args.Length || (sw != "-m" && int.TryParse(args[i], out val) == false))
+                                    goodArgs = false;
+                            }
+                            if (goodArgs == false)
                                 throw new Exception("Invalid argument");
                             svcArgs += ((first) ? string.Empty : " ") + sw;
-                            svcArgs += (" " + val.ToString());
+                            if ("-i-g-t-f-h".Contains(sw))
+                                svcArgs += (" " + val.ToString());
+                            else if (sw == "-m")
+                                svcArgs += " " + args[i];
                             first = false;
                         }
                     }
