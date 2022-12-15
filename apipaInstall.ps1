@@ -54,14 +54,16 @@ Function Test-SMTP
 
 if (Test-SMTP -eq $true) 
 {
-    [string[]] $recipients =  "michael.dumdei@texarkanacollege.edu", `
-                               "bart.upchurch@texarkanacollege.edu",  `
-                               "joshua.dunkeson@texarkanacollege.edu", `
-                               "emaly.house@texarkanacollege.edu"
+    [string[]] $recipients =  "_TC Infrastructure Services Team <infrasvcteam@texarkanacollege.edu>"
     [string]$host = $env:COMPUTERNAME
     [string]$subject = "APIPA Monitor reset the NIC on " + $host
     [string]$from = "apipamon@$($host.ToLower()).bulldog.net"
-    foreach ($f in Get-ChildItem -Path "c:\bin\apipamon" -Filter "APIPAmsg_*")
+    $msgFiles = $(Get-ChildItem -Path "c:\bin\apipamon" -Filter "APIPAmsg_*" | Sort -Property LastWriteTime)
+    if ($msgFiles.Count -gt 5) {
+        $newMsgFiles = @($msgFiles[0], $msgFiles[1], $msgFiles[$msgFiles.Count - 2], $msgFiles[$msgFiles.Count - 1])         
+        $msgFiles = $newMsgFiles     
+    }
+    foreach ($f in $msgFiles)
     {
         [string]$body = Get-Content "c:\bin\apipamon\$f"
         $recipients | Out-File "c:\bin\apipamon\lastMsg.txt"
@@ -69,8 +71,8 @@ if (Test-SMTP -eq $true)
         $script:server | Out-File -Append "c:\bin\apipamon\lastMsg.txt"
         $body | Out-File -Append "c:\bin\apipamon\lastMsg.txt"
         Send-MailMessage -To $recipients -From $from -Subject $subject -SmtpServer $script:server -Body $body -BodyAsHtml
-        Remove-Item "c:\bin\apipamon\$f"
     }
+    Remove-Item "c:\bin\apipamon\APIPAmsg_*"
 }
 '@
 

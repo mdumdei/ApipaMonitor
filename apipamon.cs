@@ -11,6 +11,8 @@
  *    vers 3.01 - Added ping test timeout as an optional parameter.
  *    vers 3.03 - Added control to limit writes to EventLog on failed gateway ping
  *    vers 3.04 - Changed default gw fails default from 1 to 2 and ping timeout to 500 msec
+ *    vers 3.10 - Added code to ignore OPENVPN interfaces
+ *    vers 3.11 - Repeat of 3.10, but should work this time
  *    
  *  Service to monitor network ports for APIPA address assignement or 3 consecutive failed 
  *  pings to the default gateway. Does a reset of the network interface if either occurs.
@@ -92,11 +94,15 @@ namespace APIPA_Monitor
     // APIPA Monitor main Service class
     public partial class apipamon : ServiceBase
     {
+        // Skip List - NICs whose name or description contain one of the words in this list are ignored by APIPA monitor.
+        //             Use ALL UPPERCASE for keywords if you want them to work!
+        private static string[] skipList = { "APIPA", "LOOPBACK", "OPENVPN", "BLUETOOTH", 
+                                             "MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER" };
         // Event log information
         private static string eventSource = "apipamon";
-        private static string startingMsg = "APIPA monitoring service starting - Version 3.05";
+        private static string startingMsg = "APIPA monitoring service starting - Version 3.11";
         // Load ping buffer with identifying information for anyone sniffing traffic
-        private static byte[] pingData = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.05 8/31/2017 - Gateway Test");
+        private static byte[] pingData = Encoding.ASCII.GetBytes("APIPA Monitor ver 3.11 12/18/2020 - Gateway Test");
         // Globals
         private System.Timers.Timer pollTimer;
         private int gwFailsCounter = 0;
@@ -105,7 +111,7 @@ namespace APIPA_Monitor
         private int nNICS = 0;
         private List<IPAddress> myIPs = new List<IPAddress>();
         // Event code values - 9000 is added to failure events if using SMTP notifications
-        private int evtStarting = 1000, evtArgsList = 1001, evtTriggerSMTP = 1002;
+        private int evtStarting = 1000, evtArgsList = 1001, evtTriggerSMTP = 1002, evtSkipList = 1003;
         private int evtArgError = 99, evtDebug = 25, evtPingException = 98;
         private int evtGwFail = 996, evtMaxGwFail = 997, evtStuck = 998, evtAPIPA = 999;
         // Default values below are overridden first by Service registry arguments if present
@@ -147,11 +153,8 @@ namespace APIPA_Monitor
             {
                 string nicName = a.Name.ToUpper();
                 try
-                {    // skip loopback, NICS with "APIPA" in the name, MS cluster NIC, and non-IPV4 enabled NICS
-                    if (nicName.Contains("APIPA") == false && nicName.Contains("LOOPBACK") == false
-                      && nicName.Contains("BLUETOOTH") == false 
-                      && a.Description.ToUpper().Contains("MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER") == false
-                      && a.GetIPProperties().GetIPv4Properties() != null)
+                {    // skip NICs with names or descriptions in the 'skipList' array and non-IPV4 enabled NICS
+                    if (onSkipList(a) == false && a.GetIPProperties().GetIPv4Properties() != null)
                     {
                         ++nNICS;
                         foreach (IPAddressInformation addr in a.GetIPProperties().UnicastAddresses)
@@ -178,10 +181,7 @@ namespace APIPA_Monitor
                 string nicName = a.Name.ToUpper();
                 try
                 {
-                    if (nicName.Contains("APIPA") == false && nicName.Contains("LOOPBACK") == false
-                      && nicName.Contains("BLUETOOTH") == false 
-                      && a.Description.ToUpper().Contains("MICROSOFT FAILOVER CLUSTER VIRTUAL ADAPTER") == false
-                      && a.GetIPProperties().GetIPv4Properties() != null)
+                    if (onSkipList(a) == false && a.GetIPProperties().GetIPv4Properties() != null) 
                     {
                         nicList[i] = new NIC(a, myIPs);    // initialize NIC holding data
                         ++i;
@@ -193,6 +193,19 @@ namespace APIPA_Monitor
             pollTimer = new System.Timers.Timer(pollInterval);  // default every 10 seconds
             pollTimer.Elapsed += new System.Timers.ElapsedEventHandler(this.pollTimer_Elapsed);
             pollTimer.Start();
+        }
+
+
+        //
+        // Check if nic name or description contains one of the keywords/phrases contained in the the skipList
+        bool onSkipList(NetworkInterface netInterface) {
+            foreach (string s in skipList) {
+                if (netInterface.Name.ToUpper().Contains(s) || netInterface.Description.ToUpper().Contains(s)) {
+                    SysUtils.WriteAppEventLog("Adapter [" + netInterface.Name + "] matched skipList keyword, ignoring", eventCode: evtSkipList);
+                    return true;
+                }
+            }
+            return false;
         }
 
         // 
