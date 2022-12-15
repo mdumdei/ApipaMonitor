@@ -1,0 +1,88 @@
+Description
+
+APIPA monitor is a watchdog service that monitors network interfaces and resets them if they
+ have an APIPA address or if they are unable to ping the default gateway. It was written to
+ losing their IP and falling back to an automatic private IP address (APIPA or the
+ 169.254.x.x range). 
+
+Operation
+The service wakes up on a user specified interval (-i option: default every 10 seconds), and
+ tests IPV4 enabled interfaces for 169.254 addressing. If an APIPA address is present, the
+ service disables and then re-enables the NIC which clears the problem. 
+
+For NICS that should have APIPA addresses, including the word “APIPA” anywhere in the NIC
+ interface NAME (right-click, rename network adapter), will prevent APIPA Monitor from
+ processing that interface. The loopback interface and any interface with “Microsoft Failover
+ Cluster Virtual Adapter” in the DESCRIPTION are also skipped. Microsoft’s clustering uses
+ APIPA addressing on the cluster virtual adapter, so you don’t want to reset that on every
+ polling cycle.
+
+The service optionally pings the default gateway every “x” seconds (-g option: default 30).
+ The test tries up to 3 times on 2 second intervals to ping the default gateway. The first of
+ the three to succeed results in a successful test and terminates the test. If all three pings
+ fail, the gateway test fails. The “maximum gateway fails” parameter (-f option: default 2)
+ determines how many gateway test fails must occur before the service resets the NIC due to an
+ unreachable gateway. 
+
+To DISABLE gateway ping tests, set the -g option to zero.
+
+Optional arguments
+-i nbrSeconds: Poll interval - how often the service activates. Tests for APIPA on every
+ activation and resets the adapter if an APIPA address is present. Do not set this to less
+ than 10 seconds.
+-g nbrSeconds: Gateway test interval - how often to run ping tests against the default
+ gateway. The test is a series of 3 pings at 2 sec intervals. If all fail, the test fails. The default interval is every 30 seconds. Note: Gateway tests happen when the service activates (polling interval), so the test happens on the first poll activation after the gateway test interval is reached.
+-t nbr_mSecs: Ping timeout – how long to wait for a ping response before the ping is
+ considered to have failed. Default is 750 msecs (some switches have low priority on ping
+ response).
+-l nbrPingFails: Number of pings allowed before writing to the EventLog. The GW should always
+ respond, but due to prioritization of ping traffic sometimes even 750 msecs isn’t long
+ enough. This prevents cluttering the EventLog due to an occasional long ping. Default is
+ allow 1 miss.
+-f nbrGwFails:  Number of gateway ping tests (3 ping) that can fail before the adapter is
+ reset due to an unresponsive gateway. The default is 2 – reset the NIC on the second gateway
+ test failure.
+-h nbrSeconds:  Number of seconds in back-off period between adapter resets. This is to
+ prevent back to back resets and allow DHCP to do its thing. Default is 25 secs.
+
+Example configuration using sc.exe (mandatory space between binpath= and first quote)
+ sc config apipamon binpath= "\"c:\bin\APIPA Monitor.exe\" -i 10 -g 25 -t 100 -l 0 -f 2 -h 45" 
+
+You may also test parameter settings by entering arguments on the General tab of the Services
+ window; however, these are one-time settings and will not persist to the next startup session.
+
+Install / Uninstall
+NOTE: If you pass bad arguments when installing, the service SILENTLY fails to install and the
+ Event log will have entries (41, 49) to help locate what it didn’t like. The 41 events are the
+ passed arguments and a 49 means there was an error. If successful, the event log will show the
+ service started and the parameters used to start the service.
+
+To install:
+  * Copy “APIPA Monitor.exe” to the folder where you want it to reside
+  * Run the EXE with a “-install” switch. You can optionally follow the “-install” switch with
+    desired settings. Example,
+    -	You want the service to activate and check for an APIPA address every 15 seconds,
+    -	You want to check for an unreachable gateway every 45 seconds,
+    -	You want a gateway ping to be considered bad if the response time is over 100 msecs,
+    -	You want to log all failed pings (0 = allow no unlogged missed gw pings), 
+    -	You want to allow one gateway test (3-ping series) to fail without resetting the NIC.
+        On the second failure, you want to reset the NIC,
+    -	Once the NIC is reset, you don’t want to reset it again for at least 90 seconds,
+
+use:  "APIPA Monitor.exe" -install -i 15 -g 45 -t 100 -l 0 -f 2 -h 90
+To install with default parameters:
+  * "APIPA Monitor.exe" -install
+  * The service will run as the local system account, with a start type of Automatic (Delayed). 
+  * Installation automatically starts the service.
+  * Event viewer tracks actions – filter Event Viewer for a source of “apipamon” to locate
+    events.
+
+To uninstall:
+  * "APIPA Monitor.exe" -uninstall
+
+Reconfigure:
+  * Use sc.exe as described earlier to change parameters without uninstalling / re-installing,
+    or just uninstall and re-install with new arguments if you prefer. 
+
+
+
