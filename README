@@ -2,8 +2,8 @@ Description
 
 APIPA monitor is a watchdog service that monitors network interfaces and resets them if they
  have an APIPA address or if they are unable to ping the default gateway. It was written to
- losing their IP and falling back to an automatic private IP address (APIPA or the
- 169.254.x.x range). 
+ fix VMs losing their IP on reboot and falling back to an automatic private IP address (APIPA
+ or the 169.254.x.x range). 
 
 Operation
 The service wakes up on a user specified interval (-i option: default every 10 seconds), and
@@ -31,7 +31,10 @@ Optional arguments
  activation and resets the adapter if an APIPA address is present. Do not set this to less
  than 10 seconds.
 -g nbrSeconds: Gateway test interval - how often to run ping tests against the default
- gateway. The test is a series of 3 pings at 2 sec intervals. If all fail, the test fails. The default interval is every 30 seconds. Note: Gateway tests happen when the service activates (polling interval), so the test happens on the first poll activation after the gateway test interval is reached.
+ gateway. The test is a series of 3 pings at 2 sec intervals. If all fail, the test fails. 
+ The default interval is every 30 seconds. 
+  Note: Gateway tests happen when the service activates (polling interval), so the test happens
+  on the first poll activation after the gateway test interval is reached.
 -t nbr_mSecs: Ping timeout – how long to wait for a ping response before the ping is
  considered to have failed. Default is 750 msecs (some switches have low priority on ping
  response).
